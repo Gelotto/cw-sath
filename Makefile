@@ -1,7 +1,8 @@
 network 				?= devnet  # network := devnet|mainnet|testnet
 sender 					?= juno16g2rahf5846rxzp3fwlswy08fz8ccuwk03k57y
 build_dir 				?= ./builds
-wasm_filename 			?= cw_contract.wasm
+wasm_filename 			?= cw_sath.wasm
+tag						?= dev
 
 # build optimized WASM artifact
 build:
