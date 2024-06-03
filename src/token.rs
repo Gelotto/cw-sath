@@ -11,6 +11,12 @@ pub enum Token {
     Address(Addr),
 }
 
+#[cw_serde]
+pub struct TokenAmount {
+    pub token: Token,
+    pub amount: Uint128,
+}
+
 impl Token {
     pub fn to_key(&self) -> String {
         match self {

@@ -1,4 +1,5 @@
 pub mod account;
+pub mod house;
 
 use cosmwasm_std::{Deps, Env};
 

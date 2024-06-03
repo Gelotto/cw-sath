@@ -1,5 +1,7 @@
+pub mod claim;
 pub mod deposit;
 pub mod stake;
+pub mod unstake;
 
 use cosmwasm_std::{DepsMut, Env, MessageInfo};
 

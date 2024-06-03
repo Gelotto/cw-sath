@@ -1,12 +1,14 @@
 use crate::{
     error::ContractError,
-    math::add_u128,
+    math::{add_u128, add_u32},
     msg::StakeMsg,
     state::{
-        models::{Account, DelegationEvent},
-        storage::{ACCOUNTS, DELEGATION, DELEGATION_EVENTS, EVENT_SEQ_NO},
+        models::{Account, StakingEvent},
+        storage::{
+            ACCOUNTS, CONFIG_STAKE_TOKEN, DELEGATION, N_ACCOUNTS, QUEUE, SEQ_NO, STAKING_EVENTS,
+        },
     },
-    sync::sync_account,
+    sync::{amortize, persist_sync_results, sync_account},
 };
 use cosmwasm_std::{attr, Response};
 
@@ -17,25 +19,45 @@ pub fn exec_stake(
     params: StakeMsg,
 ) -> Result<Response, ContractError> {
     let Context { deps, env, info } = ctx;
-    let StakeMsg { amount, recipient } = params;
-    let seq_no = EVENT_SEQ_NO.load(deps.storage)?;
+    let seq_no = SEQ_NO.load(deps.storage)?;
     let t = env.block.time;
+    let StakeMsg {
+        amount,
+        address: recipient,
+    } = params;
 
     // Stake on behalf of any specified recipient or default to tx sender
-    let delegator = recipient.unwrap_or(info.sender);
+    let token = CONFIG_STAKE_TOKEN.load(deps.storage)?;
+    let staker = recipient.unwrap_or(info.sender.to_owned());
 
-    // Get or create delegator's account
-    let mut account = ACCOUNTS
-        .may_load(deps.storage, &delegator)?
-        .unwrap_or_else(|| Account::new(t, seq_no));
-
-    // Eagerly sync account before adding new delegation
-    sync_account(deps.storage, deps.api, &mut account, &delegator, t, seq_no)?;
+    // Get or create stake account
+    let mut account = if let Some(account) = ACCOUNTS.may_load(deps.storage, &staker)? {
+        let results = sync_account(
+            deps.storage,
+            deps.api,
+            &staker,
+            &account,
+            t,
+            seq_no,
+            Some(token.to_owned()),
+        )?;
+        for (result, state) in results.iter() {
+            persist_sync_results(deps.storage, &info.sender, result, state)?;
+        }
+        account
+    } else {
+        // Add to amortization queue since account is new
+        QUEUE.push_back(deps.storage, &staker)?;
+        N_ACCOUNTS.update(deps.storage, |n| -> Result<_, ContractError> {
+            add_u32(n, 1)
+        })?;
+        Account::new(t, seq_no)
+    };
 
     account.add_delegation(amount)?;
 
     // Save account now that it has been synced and delegation incremented
-    ACCOUNTS.save(deps.storage, &delegator, &account)?;
+    ACCOUNTS.save(deps.storage, &staker, &account)?;
 
     // Increment total delegation across all accounts
     DELEGATION.update(deps.storage, |delegation| -> Result<_, ContractError> {
@@ -43,19 +65,28 @@ pub fn exec_stake(
     })?;
 
     // Upsert a delegation event for this delegator
-    DELEGATION_EVENTS.update(
+    STAKING_EVENTS.update(
         deps.storage,
-        (&delegator, t.nanos(), seq_no.u64()),
+        (&staker, t.nanos(), seq_no.u64()),
         |maybe_event| -> Result<_, ContractError> {
             if let Some(mut event) = maybe_event {
-                event.d = add_u128(event.d, amount)?;
+                event.delta = add_u128(event.delta, amount)?;
                 Ok(event)
             } else {
-                Ok(DelegationEvent {
-                    d: account.delegation,
+                Ok(StakingEvent {
+                    delta: account.delegation,
                 })
             }
         },
+    )?;
+
+    amortize(
+        deps.storage,
+        t,
+        seq_no,
+        5,
+        Some(token.to_owned()),
+        Some(staker),
     )?;
 
     Ok(Response::new().add_attributes(vec![attr("action", "stake")]))

@@ -4,6 +4,7 @@ use crate::execute::stake::exec_stake;
 use crate::execute::Context;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::query::account::query_account;
+use crate::query::house::query_house;
 use crate::query::ReadonlyContext;
 use crate::state;
 use cosmwasm_std::{entry_point, to_json_binary};
@@ -47,6 +48,7 @@ pub fn query(
     let ctx = ReadonlyContext { deps, env };
     let result = match msg {
         QueryMsg::Account { address } => to_json_binary(&query_account(ctx, address)?),
+        QueryMsg::House {} => to_json_binary(&query_house(ctx)?),
     }?;
     Ok(result)
 }
