@@ -19,6 +19,10 @@ pub struct BalanceEvent {
     pub n_accounts: u32,
     /// Reference count for garbage collection
     pub ref_count: u32,
+    /// Value used to determine if new event is needed
+    /// or if this one can simply be updated. Compared
+    /// with the global X storage var.
+    pub x: Uint64,
 }
 
 #[cw_serde]

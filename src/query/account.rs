@@ -50,8 +50,8 @@ pub fn query_account(
                 &address,
                 &mut sync_state,
                 &token,
-                t,
                 seq_no,
+                true,
             )?;
 
             balances.push(TokenAmount {

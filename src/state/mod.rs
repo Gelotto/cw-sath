@@ -4,7 +4,7 @@ pub mod storage;
 use cosmwasm_std::{Response, Uint128, Uint64};
 use storage::{
     CONFIG_LIQUIDITY_TOKENS, CONFIG_STAKE_TOKEN, CONFIG_UNBONDING_SECONDS, CREATED_AT, CREATED_BY,
-    DESCRIPTION, MANAGED_BY, NAME, N_ACCOUNTS,
+    DESCRIPTION, MANAGED_BY, NAME, N_ACCOUNTS, N_DEPOSITS, X,
 };
 
 use crate::{error::ContractError, execute::Context, msg::InstantiateMsg};
@@ -19,11 +19,13 @@ pub fn init(
     let Context { deps, info, env } = ctx;
     DELEGATION.save(deps.storage, &Uint128::zero())?;
     SEQ_NO.save(deps.storage, &Uint64::zero())?;
+    X.save(deps.storage, &Uint64::zero())?;
 
     CREATED_AT.save(deps.storage, &env.block.time)?;
     CREATED_BY.save(deps.storage, &info.sender)?;
     MANAGED_BY.save(deps.storage, &info.sender)?;
 
+    N_DEPOSITS.save(deps.storage, &Uint64::zero())?;
     N_ACCOUNTS.save(deps.storage, &0)?;
 
     if let Some(name) = &msg.name {

@@ -1,11 +1,11 @@
 use crate::{
     error::ContractError,
-    math::{add_u128, add_u32},
+    math::{add_u128, add_u32, add_u64},
     msg::StakeMsg,
     state::{
         models::{Account, StakingEvent},
         storage::{
-            ACCOUNTS, CONFIG_STAKE_TOKEN, DELEGATION, N_ACCOUNTS, QUEUE, SEQ_NO, STAKING_EVENTS,
+            ACCOUNTS, CONFIG_STAKE_TOKEN, DELEGATION, N_ACCOUNTS, QUEUE, SEQ_NO, STAKING_EVENTS, X,
         },
     },
     sync::{amortize, persist_sync_results, sync_account},
@@ -37,9 +37,9 @@ pub fn exec_stake(
             deps.api,
             &staker,
             &account,
-            t,
             seq_no,
             Some(token.to_owned()),
+            false,
         )?;
         for (result, state) in results.iter() {
             persist_sync_results(deps.storage, &info.sender, result, state)?;
@@ -67,7 +67,7 @@ pub fn exec_stake(
     // Upsert a delegation event for this delegator
     STAKING_EVENTS.update(
         deps.storage,
-        (&staker, t.nanos(), seq_no.u64()),
+        (&staker, seq_no.u64()),
         |maybe_event| -> Result<_, ContractError> {
             if let Some(mut event) = maybe_event {
                 event.delta = add_u128(event.delta, amount)?;
@@ -80,9 +80,13 @@ pub fn exec_stake(
         },
     )?;
 
+    // Increment trigger to indicate that next deposit should create new event.
+    X.update(deps.storage, |x| -> Result<_, ContractError> {
+        add_u64(x, 1u64)
+    })?;
+
     amortize(
         deps.storage,
-        t,
         seq_no,
         5,
         Some(token.to_owned()),

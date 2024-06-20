@@ -22,14 +22,16 @@ pub const DESCRIPTION: Item<String> = Item::new("description");
 pub const DELEGATION: Item<Uint128> = Item::new("delegation");
 
 pub const N_ACCOUNTS: Item<u32> = Item::new("n_accounts");
+pub const N_DEPOSITS: Item<Uint64> = Item::new("n_deposits");
+pub const X: Item<Uint64> = Item::new("x"); // DEPRECATED
 
 pub const ACCOUNTS: Map<&Addr, Account> = Map::new("accounts");
 pub const ACCOUNT_SYNC_INFOS: Map<(&Addr, &String), AccountSyncState> = Map::new("account_syncs");
 pub const ACCOUNT_UNBONDINGS: Map<&Addr, AccountUnbondingState> = Map::new("account_unbondings");
 
 pub const SEQ_NO: Item<Uint64> = Item::new("seq_no");
-pub const BALANCE_EVENTS: Map<(&String, u64, u64), BalanceEvent> = Map::new("ts_balance");
-pub const STAKING_EVENTS: Map<(&Addr, u64, u64), StakingEvent> = Map::new("ts_stake");
+pub const TS_BALANCE: Map<(&String, u64), BalanceEvent> = Map::new("ts_balance");
+pub const STAKING_EVENTS: Map<(&Addr, u64), StakingEvent> = Map::new("ts_stake");
 
 pub const FEES: Map<&String, TokenAmount> = Map::new("fees");
 pub const BALANCES: Map<&String, TokenAmount> = Map::new("balances");

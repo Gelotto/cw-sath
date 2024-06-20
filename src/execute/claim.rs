@@ -2,7 +2,7 @@ use crate::{
     error::ContractError,
     math::add_u64,
     msg::ClaimMsg,
-    state::storage::{ACCOUNTS, SEQ_NO},
+    state::storage::{ACCOUNTS, SEQ_NO, X},
     sync::{amortize, persist_sync_results, sync_account},
 };
 use cosmwasm_std::{attr, Response, SubMsg, Uint128, Uint64};
@@ -22,9 +22,9 @@ pub fn exec_claim(
         deps.api,
         &info.sender,
         &ACCOUNTS.load(deps.storage, &info.sender)?,
-        env.block.time,
         seq_no,
         Some(params.token.to_owned()),
+        true,
     )?;
 
     // accumulate transfer submsgs and reset sync amounts to 0
@@ -37,9 +37,13 @@ pub fn exec_claim(
         persist_sync_results(deps.storage, &info.sender, result, sync_state)?;
     }
 
+    // Increment trigger to indicate that next deposit should create new event.
+    X.update(deps.storage, |x| -> Result<_, ContractError> {
+        add_u64(x, 1u64)
+    })?;
+
     amortize(
         deps.storage,
-        env.block.time,
         seq_no.into(),
         5,
         Some(params.token),

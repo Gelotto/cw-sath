@@ -1,12 +1,12 @@
 use crate::{
     error::ContractError,
-    math::{add_u128, div_u128, mul_ratio_u128, sub_u128},
+    math::{add_u128, add_u64, div_u128, mul_ratio_u128, sub_u128},
     msg::UnstakeMsg,
     state::{
         models::{AccountUnbondingState, StakingEvent},
         storage::{
             ACCOUNTS, ACCOUNT_UNBONDINGS, CONFIG_UNBONDING_SECONDS, DELEGATION, SEQ_NO,
-            STAKING_EVENTS,
+            STAKING_EVENTS, X,
         },
     },
     sync::{amortize, persist_sync_results, sync_account},
@@ -40,9 +40,9 @@ pub fn exec_unstake(
             deps.api,
             &delegator_addr,
             &account,
-            t,
             seq_no,
             None,
+            false,
         )?;
 
         for (result, state) in results.iter() {
@@ -62,7 +62,7 @@ pub fn exec_unstake(
         // Upsert a delegation event for this delegator
         STAKING_EVENTS.update(
             deps.storage,
-            (&delegator_addr, t.nanos(), seq_no.u64()),
+            (&delegator_addr, seq_no.u64()),
             |maybe_event| -> Result<_, ContractError> {
                 if let Some(mut event) = maybe_event {
                     event.delta = sub_u128(event.delta, amount)?;
@@ -118,7 +118,12 @@ pub fn exec_unstake(
         });
     }
 
-    amortize(deps.storage, t, seq_no, 5, None, Some(delegator_addr))?;
+    // Increment trigger to indicate that next deposit should create new event.
+    X.update(deps.storage, |x| -> Result<_, ContractError> {
+        add_u64(x, 1u64)
+    })?;
+
+    amortize(deps.storage, seq_no, 5, None, Some(delegator_addr))?;
 
     Ok(Response::new().add_attributes(vec![attr("action", "stake")]))
 }
