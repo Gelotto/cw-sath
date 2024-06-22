@@ -5,12 +5,34 @@ use crate::token::Token;
 
 #[cw_serde]
 pub struct InstantiateMsg {
+    pub marketing: HouseMarketingInfo,
+    pub taxes: Vec<TaxRecipientInitArgs>,
+    pub staking: StakingConfig,
+}
+
+#[cw_serde]
+pub struct StakingConfig {
+    pub staking_token: Token,
+    pub revenue_tokens: Vec<Token>,
+    pub min_increment: Option<Uint128>,
+    pub unbonding_seconds: Option<Uint64>,
+}
+
+#[cw_serde]
+pub struct TaxRecipientInitArgs {
+    pub address: Addr,
+    pub name: Option<String>,
+    pub logo: Option<String>,
+    pub pct: Uint128,
+    pub autosend: bool,
+    pub immutable: bool,
+}
+
+#[cw_serde]
+pub struct HouseMarketingInfo {
+    pub logo: Option<String>,
     pub name: Option<String>,
     pub description: Option<String>,
-    pub stake_token: Token,
-    pub liquidity_tokens: Vec<Token>,
-    pub unbonding_seconds: Uint64,
-    pub fee_rate: Uint128,
 }
 
 #[cw_serde]
@@ -40,12 +62,16 @@ pub struct ClaimMsg {
 pub enum ExecuteMsg {
     Deposit(DepositMsg),
     Stake(StakeMsg),
+    Unstake(UnstakeMsg),
+    Claim(ClaimMsg),
 }
 
 #[cw_serde]
 pub enum QueryMsg {
     Account { address: Addr },
     House {},
+    Deposits {},
+    Taxes {},
 }
 
 #[cw_serde]

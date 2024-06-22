@@ -1,13 +1,11 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Timestamp, Uint128, Uint64};
+use cosmwasm_std::{Addr, Timestamp, Uint128, Uint64};
 
 use crate::{
     error::ContractError,
     math::{add_u128, sub_u128},
+    token::{Token, TokenAmount},
 };
-
-#[cw_serde]
-pub struct Config {}
 
 #[cw_serde]
 pub struct BalanceEvent {
@@ -36,6 +34,52 @@ pub struct AccountSyncState {
     pub t: Timestamp,
     pub seq_no: Uint64,
     pub amount: Uint128,
+}
+
+#[cw_serde]
+pub struct DepositTotals {
+    pub n: Uint64,
+    pub amount: Uint128,
+}
+
+#[cw_serde]
+pub struct DepositTokenAmount {
+    pub n: Uint64,
+    pub amount: Uint128,
+    pub token: Token,
+}
+
+#[cw_serde]
+pub struct TaxRecipientInfo {
+    pub name: Option<String>,
+    pub logo: Option<String>,
+}
+
+#[cw_serde]
+pub struct TaxRecipientConfig {
+    pub pct: Uint128,
+    pub autosend: bool,
+    pub immutable: bool,
+}
+
+#[cw_serde]
+pub struct TaxRecipientBalance {
+    pub balance: Uint128,
+    pub total: Uint128,
+}
+
+#[cw_serde]
+pub struct TaxRecipient {
+    pub address: Addr,
+    pub totals: Vec<TokenAmount>,
+    pub name: Option<String>,
+    pub auto: bool,
+}
+
+#[cw_serde]
+pub struct Depositor {
+    pub address: Addr,
+    pub totals: Vec<DepositTokenAmount>,
 }
 
 #[cw_serde]

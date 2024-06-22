@@ -1,11 +1,11 @@
-use cosmwasm_std::{Addr, Order, StdResult, Uint128, Uint64};
+use cosmwasm_std::{Addr, Order, StdResult, Uint128};
 
 use crate::{
     error::ContractError,
     responses::AccountResponse,
     state::{
         models::AccountSyncState,
-        storage::{ACCOUNTS, ACCOUNT_SYNC_INFOS, CONFIG_LIQUIDITY_TOKENS, SEQ_NO},
+        storage::{ACCOUNTS, ACCOUNT_SYNC_INFOS, ACCOUNT_UNBONDINGS, BALANCES, SEQ_NO},
     },
     sync::sync_account_balance,
     token::{Token, TokenAmount},
@@ -17,22 +17,18 @@ pub fn query_account(
     ctx: ReadonlyContext,
     address: Addr,
 ) -> Result<Option<AccountResponse>, ContractError> {
-    let ReadonlyContext { deps, env, .. } = ctx;
+    let ReadonlyContext { deps, .. } = ctx;
     let seq_no = SEQ_NO.load(deps.storage)?;
-    let t = env.block.time;
 
     if let Some(account) = ACCOUNTS.may_load(deps.storage, &address)? {
-        if account.delegation.is_zero() {
-            return Ok(None);
-        }
-
         let mut balances: Vec<TokenAmount> = Vec::with_capacity(2);
 
-        for result in CONFIG_LIQUIDITY_TOKENS
-            .range(deps.storage, None, None, Order::Ascending)
-            .collect::<Vec<StdResult<(_, Token)>>>()
+        for result in BALANCES
+            .keys(deps.storage, None, None, Order::Ascending)
+            .collect::<Vec<StdResult<_>>>()
         {
-            let (_, token) = result?;
+            let token_key = result?;
+            let token = Token::from_key(&token_key);
             let mut sync_state = ACCOUNT_SYNC_INFOS
                 .may_load(deps.storage, (&address, &token.to_key()))?
                 .or_else(|| {
@@ -63,6 +59,7 @@ pub fn query_account(
         return Ok(Some(AccountResponse {
             created_at: account.created_at,
             delegation: account.delegation,
+            unbonding: ACCOUNT_UNBONDINGS.may_load(deps.storage, &address)?,
             balances,
         }));
     }

@@ -52,6 +52,16 @@ pub fn add_u128<A: Into<Uint128>, B: Into<Uint128>>(
         .map_err(|e| ContractError::Std(StdError::overflow(e)))
 }
 
+pub fn sum_u128(values: Vec<Uint128>) -> Result<Uint128, ContractError> {
+    let mut total = Uint128::zero();
+    for v in values.iter().as_ref() {
+        total = total
+            .checked_add(*v)
+            .map_err(|e| ContractError::Std(StdError::overflow(e)))?;
+    }
+    Ok(total)
+}
+
 pub fn sub_u128<A: Into<Uint128>, B: Into<Uint128>>(
     a: A,
     b: B,
@@ -107,9 +117,31 @@ pub fn add_u32(
     a: u32,
     b: u32,
 ) -> Result<u32, ContractError> {
-    a.checked_add(1).ok_or_else(|| {
+    a.checked_add(b).ok_or_else(|| {
         ContractError::Std(StdError::Overflow {
             source: OverflowError::new(OverflowOperation::Add, a, b),
+        })
+    })
+}
+
+pub fn mul_u32(
+    a: u32,
+    b: u32,
+) -> Result<u32, ContractError> {
+    a.checked_mul(b).ok_or_else(|| {
+        ContractError::Std(StdError::Overflow {
+            source: OverflowError::new(OverflowOperation::Mul, a, b),
+        })
+    })
+}
+
+pub fn sub_u32(
+    a: u32,
+    b: u32,
+) -> Result<u32, ContractError> {
+    a.checked_sub(b).ok_or_else(|| {
+        ContractError::Std(StdError::Overflow {
+            source: OverflowError::new(OverflowOperation::Sub, a, b),
         })
     })
 }

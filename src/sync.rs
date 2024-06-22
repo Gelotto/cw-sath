@@ -1,20 +1,24 @@
 use std::marker::PhantomData;
 
-use cosmwasm_std::{Addr, Api, Order, Storage, Timestamp, Uint128, Uint64};
-use cw_storage_plus::{Bound, PrefixBound};
+use cosmwasm_std::{Addr, Api, Order, Storage, Uint128, Uint64};
+use cw_storage_plus::Bound;
 
 use crate::{
     error::ContractError,
-    math::{add_u128, mul_ratio_u128},
+    math::{add_u128, mul_ratio_u128, mul_u32, sub_u32},
     state::{
         models::{Account, AccountSyncState, BalanceEvent, StakingEvent},
-        storage::{ACCOUNT_SYNC_INFOS, CONFIG_LIQUIDITY_TOKENS, QUEUE, STAKING_EVENTS, TS_BALANCE},
+        storage::{
+            ACCOUNTS, ACCOUNT_SYNC_INFOS, AMORTIZATION_QUEUE, N_ACCOUNTS, N_BALANCE_EVENTS,
+            TS_BALANCE, TS_STAKE,
+        },
     },
     token::Token,
 };
 
 pub struct TokenSyncResult {
     pub token: Token,
+    pub updated_balance_events: Vec<((String, u64), BalanceEvent)>,
     pub zombie_balance_event_keys: Vec<(String, u64)>,
     pub zombie_delegation_event_keys: Vec<u64>,
     pub synced_amount: Uint128,
@@ -22,31 +26,38 @@ pub struct TokenSyncResult {
 
 pub fn amortize(
     store: &mut dyn Storage,
+    api: &dyn Api,
     seq_no: Uint64,
-    n: u32,
     token: Option<Token>,
     ignore_address: Option<Addr>,
 ) -> Result<(), ContractError> {
-    // let queue_size = QUEUE.len(store)?;
-    // if queue_size > 0 {
-    //     let n = n.min(queue_size);
-    //     for _ in 0..n {
-    //         if let Some(addr) = QUEUE.pop_front(store)? {
-    //             if let Some(ignore_addr) = &ignore_address {
-    //                 if addr == *ignore_addr {
-    //                     QUEUE.push_back(store, &addr)?;
-    //                     continue;
-    //                 }
-    //             }
-    //             let results = sync_account(store, &addr, time, seq_no, token.to_owned())?;
-    //             for (result, state) in results.iter() {
-    //                 persist_sync_results(store, &addr, result, state)?;
-    //             }
+    let n_accounts = N_ACCOUNTS.load(store)?;
+    let queue_size = AMORTIZATION_QUEUE.len(store)?;
 
-    //             QUEUE.push_back(store, &addr)?;
-    //         }
-    //     }
-    // }
+    if queue_size > 0 {
+        let n = 10
+            .min(queue_size)
+            .min((mul_u32(n_accounts, 50_000)?) / 1_000_000);
+
+        for _ in 0..n {
+            if let Some(addr) = AMORTIZATION_QUEUE.pop_front(store)? {
+                if let Some(ignore_addr) = &ignore_address {
+                    if addr == *ignore_addr {
+                        AMORTIZATION_QUEUE.push_back(store, &addr)?;
+                        continue;
+                    }
+                }
+                if let Some(account) = ACCOUNTS.may_load(store, &addr)? {
+                    let results =
+                        sync_account(store, api, &addr, &account, seq_no, token.to_owned(), false)?;
+                    for (result, state) in results.iter() {
+                        persist_sync_results(store, &addr, result, state)?;
+                    }
+                    AMORTIZATION_QUEUE.push_back(store, &addr)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -58,14 +69,28 @@ pub fn persist_sync_results(
 ) -> Result<(), ContractError> {
     ACCOUNT_SYNC_INFOS.save(store, (&staker, &result.token.to_key()), sync_state)?;
 
-    for key in result.zombie_balance_event_keys.iter() {
-        let (a, b) = key;
-        TS_BALANCE.remove(store, (a, *b));
+    for ((a, b), v) in result.updated_balance_events.iter() {
+        TS_BALANCE.save(store, (a, *b), v)?;
     }
 
-    for key in result.zombie_delegation_event_keys.iter() {
-        let b = key;
-        STAKING_EVENTS.remove(store, (staker, *b));
+    N_BALANCE_EVENTS.update(
+        store,
+        &result.token.to_key(),
+        |maybe_n| -> Result<_, ContractError> {
+            sub_u32(
+                maybe_n.unwrap_or_default(),
+                result.zombie_balance_event_keys.len() as u32,
+            )
+        },
+    )?;
+
+    for key in result.zombie_balance_event_keys.iter() {
+        let (token_key, seq_no) = key;
+        TS_BALANCE.remove(store, (token_key, *seq_no));
+    }
+
+    for seq_no in result.zombie_delegation_event_keys.iter() {
+        TS_STAKE.remove(store, (staker, *seq_no));
     }
 
     Ok(())
@@ -109,7 +134,7 @@ pub fn sync_account(
             .range(store, None, None, Order::Ascending)
         {
             let (token_key, mut sync_state) = result?;
-            let token = CONFIG_LIQUIDITY_TOKENS.load(store, &token_key)?;
+            let token = Token::from_key(&token_key);
             if let Some(result) = sync_account_balance(
                 store,
                 api,
@@ -153,7 +178,7 @@ fn perform_sync(
     sync_state: &AccountSyncState,
     token: &Token,
     seq_no: Uint64,
-    terminal: bool,
+    _terminal: bool,
 ) -> Result<Option<TokenSyncResult>, ContractError> {
     let mut delegation_events = load_delegation_events(store, &delegator, sync_state, seq_no)?;
     let mut agg_sync_amount = Uint128::zero();
@@ -177,6 +202,7 @@ fn perform_sync(
     let token_key = token.to_key();
 
     // Return these keys and delete the events in caller
+    let mut updated_balance_events: Vec<((String, u64), BalanceEvent)> = Vec::with_capacity(2);
     let mut zombie_balance_event_keys: Vec<(String, u64)> = Vec::with_capacity(2);
     let mut zombie_delegation_event_keys: Vec<u64> = Vec::with_capacity(2);
 
@@ -190,10 +216,6 @@ fn perform_sync(
         let account_deleg = e1.delta;
         let (s2, _) = &delegation_events[i + 1];
 
-        // if !terminal && (seq_no.u64() - 1 == *s2) {
-        //     break;
-        // }
-
         api.debug(format!("processing delegation events btw: {:?} - {:?}", s1, s2).as_str());
 
         // Accumulate the delegator's share of revenue between the given
@@ -204,19 +226,9 @@ fn perform_sync(
             Some(Bound::Exclusive(((&token_key, *s2), PhantomData))),
             Order::Ascending,
         ) {
-            let (
-                (_, _),
-                BalanceEvent {
-                    delta: revenue,
-                    total: total_deleg,
-                    ..
-                },
-            ) = result?;
+            let (k, mut e) = result?;
 
-            api.debug(format!("processing balance event delta: {:?}", revenue).as_str());
-            // if ref_count - 1 == 0 {
-            //     zombie_balance_event_keys.push((token_key.to_owned(), s));
-            // }
+            api.debug(format!("processing balance event delta: {:?}", e.delta).as_str());
 
             zombie_delegation_event_keys.push(*s1);
 
@@ -224,12 +236,21 @@ fn perform_sync(
             // RevenueEvent based on their delegation compared to total
             // delegation across all accounts at that time, and increment
             // the running total sync amount.
-            let account_revenue = mul_ratio_u128(revenue, account_deleg, total_deleg)?;
+            let account_revenue = mul_ratio_u128(e.delta, account_deleg, e.total)?;
             agg_sync_amount = add_u128(agg_sync_amount, account_revenue)?;
+
+            e.ref_count = sub_u32(e.ref_count, 1)?;
+
+            if e.ref_count == 0 {
+                zombie_balance_event_keys.push(k);
+            } else {
+                updated_balance_events.push((k, e));
+            }
         }
     }
 
     Ok(Some(TokenSyncResult {
+        updated_balance_events,
         zombie_balance_event_keys,
         zombie_delegation_event_keys,
         synced_amount: agg_sync_amount,
@@ -244,7 +265,7 @@ pub fn load_delegation_events(
     seq_no: Uint64,
 ) -> Result<Vec<(u64, StakingEvent)>, ContractError> {
     let mut events: Vec<(u64, StakingEvent)> = Vec::with_capacity(8);
-    for result in STAKING_EVENTS.range(
+    for result in TS_STAKE.range(
         store,
         Some(Bound::Inclusive((
             (&delegator, sync.seq_no.u64()),

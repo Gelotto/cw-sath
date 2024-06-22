@@ -20,8 +20,16 @@ pub struct TokenAmount {
 impl Token {
     pub fn to_key(&self) -> String {
         match self {
-            Self::Address(address) => address.to_string(),
-            Self::Denom(denom) => denom.clone(),
+            Self::Address(address) => format!("a_{}", address.as_str()),
+            Self::Denom(denom) => format!("d_{}", denom),
+        }
+    }
+
+    pub fn from_key(key: &String) -> Self {
+        if key.starts_with("a_") {
+            Self::Address(Addr::unchecked(key[2..].to_string()))
+        } else {
+            Self::Denom(key[2..].to_string())
         }
     }
 

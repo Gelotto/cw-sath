@@ -5,7 +5,8 @@ use crate::{
     state::{
         models::{Account, StakingEvent},
         storage::{
-            ACCOUNTS, CONFIG_STAKE_TOKEN, DELEGATION, N_ACCOUNTS, QUEUE, SEQ_NO, STAKING_EVENTS, X,
+            ACCOUNTS, AMORTIZATION_QUEUE, N_ACCOUNTS, SEQ_NO, STAKING_TOKEN, TOTAL_DELEGATION,
+            TS_STAKE, X,
         },
     },
     sync::{amortize, persist_sync_results, sync_account},
@@ -27,7 +28,7 @@ pub fn exec_stake(
     } = params;
 
     // Stake on behalf of any specified recipient or default to tx sender
-    let token = CONFIG_STAKE_TOKEN.load(deps.storage)?;
+    let token = STAKING_TOKEN.load(deps.storage)?;
     let staker = recipient.unwrap_or(info.sender.to_owned());
 
     // Get or create stake account
@@ -47,7 +48,7 @@ pub fn exec_stake(
         account
     } else {
         // Add to amortization queue since account is new
-        QUEUE.push_back(deps.storage, &staker)?;
+        AMORTIZATION_QUEUE.push_back(deps.storage, &staker)?;
         N_ACCOUNTS.update(deps.storage, |n| -> Result<_, ContractError> {
             add_u32(n, 1)
         })?;
@@ -60,12 +61,12 @@ pub fn exec_stake(
     ACCOUNTS.save(deps.storage, &staker, &account)?;
 
     // Increment total delegation across all accounts
-    DELEGATION.update(deps.storage, |delegation| -> Result<_, ContractError> {
+    TOTAL_DELEGATION.update(deps.storage, |delegation| -> Result<_, ContractError> {
         add_u128(delegation, amount)
     })?;
 
     // Upsert a delegation event for this delegator
-    STAKING_EVENTS.update(
+    TS_STAKE.update(
         deps.storage,
         (&staker, seq_no.u64()),
         |maybe_event| -> Result<_, ContractError> {
@@ -87,8 +88,8 @@ pub fn exec_stake(
 
     amortize(
         deps.storage,
+        deps.api,
         seq_no,
-        5,
         Some(token.to_owned()),
         Some(staker),
     )?;
